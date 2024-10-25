@@ -8,8 +8,15 @@ require('dotenv').config();
 const path = require('path')
 const port = process.env.PORT || 5000;
 
+const corsOptions = {
+    origin: ['http://localhost:3000', 'https://your-production-url.com'], // Replace with actual production URL
+    methods: ['GET', 'POST'], 
+    allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Setup multer for file uploads
