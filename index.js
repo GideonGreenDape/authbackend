@@ -20,12 +20,12 @@ const corsOptions = {
 // Middleware
 
 app.use(express.json());
+app.use(bodyParser.json({ limit: '10mb' }));
 
 // Setup multer for handling multiple fields
 const storage = multer.memoryStorage();
 const upload = multer({ storage }).fields([
     { name: 'profilePhoto', maxCount: 1 },
-    { name: 'fingerprintImage', maxCount: 1 } // Assuming fingerprintImage is uploaded as an image; otherwise, remove it here.
 ]);
 
 // Setup CORS to handle preflight requests for all routes
