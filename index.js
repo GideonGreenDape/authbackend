@@ -23,6 +23,7 @@ app.use(express.json());
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 app.use(cors(corsOptions));
+app.options('/upload', cors(corsOptions));
 
 // MongoDB Connection URI
 const client = new MongoClient(process.env.MONGODB_URI);
