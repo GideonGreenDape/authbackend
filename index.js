@@ -3,6 +3,7 @@ const multer = require('multer');
 const { MongoClient } = require('mongodb');
 const cors = require('cors');
 const { spawn } = require('child_process')
+const bodyParser = require('body-parser');
 const app = express();
 require('dotenv').config();
 const path = require('path')
