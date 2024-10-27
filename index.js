@@ -19,33 +19,46 @@ const corsOptions = {
 
 app.use(express.json());
 
-// Setup multer for file uploads
+// Setup multer for handling multiple fields
 const storage = multer.memoryStorage();
-const upload = multer({ storage });
+const upload = multer({ storage }).fields([
+    { name: 'profilePhoto', maxCount: 1 },
+    { name: 'fingerprintImage', maxCount: 1 } // Assuming fingerprintImage is uploaded as an image; otherwise, remove it here.
+]);
+
+// Setup CORS to handle preflight requests for all routes
 app.use(cors(corsOptions));
-app.options('/upload', cors(corsOptions));
+app.options('*', cors(corsOptions)); // Allow preflight for all routes
 
 // MongoDB Connection URI
 const client = new MongoClient(process.env.MONGODB_URI);
 
 // Endpoint to handle multipart/form-data
-app.post('/upload', upload.single('profilePhoto'), async (req, res) => {
+app.post('/upload', upload, async (req, res) => {
     try {
         // Connect to the MongoDB database
         await client.connect();
         const database = client.db('designsbyese');
         const collection = database.collection('samples');
 
-        // Decode the base64 string
-        const base64Data = req.body.fingerprintImage.replace(/^data:image\/png;base64,/, "");
-        const fingerprintBuffer = Buffer.from(base64Data, 'base64');
+        // Handle the profile photo and fingerprint image
+        const profilePhotoBuffer = req.files['profilePhoto'] ? req.files['profilePhoto'][0].buffer : null;
+
+        // Decode the base64 string from fingerprintImage field if it's a base64 string
+        let fingerprintBuffer;
+        if (req.body.fingerprintImage) {
+            const base64Data = req.body.fingerprintImage.replace(/^data:image\/png;base64,/, "");
+            fingerprintBuffer = Buffer.from(base64Data, 'base64');
+        } else {
+            fingerprintBuffer = null;
+        }
 
         // Prepare data to insert
         const sampleData = {
             firstName: req.body.firstName,
             lastName: req.body.lastName,
             middleName: req.body.middleName,
-            profilePhoto: req.file.buffer, // Store image as Buffer
+            profilePhoto: profilePhotoBuffer, // Store image as Buffer
             fingerprintImage: fingerprintBuffer, // Store fingerprint image as Buffer
             uploadedAt: new Date(),
         };
@@ -64,6 +77,7 @@ app.post('/upload', upload.single('profilePhoto'), async (req, res) => {
         await client.close();
     }
 });
+
 
 
 app.post('/validatefingerprint', async (req, res) => {
