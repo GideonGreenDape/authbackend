@@ -16,12 +16,13 @@ const corsOptions = {
 
 
 // Middleware
-app.use(cors(corsOptions));
+
 app.use(express.json());
 
 // Setup multer for file uploads
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
+app.use(cors(corsOptions));
 
 // MongoDB Connection URI
 const client = new MongoClient(process.env.MONGODB_URI);
@@ -147,7 +148,6 @@ app.post('/validatefingerprint', async (req, res) => {
         console.error('Error validating fingerprint:', error);
         return res.status(500).json({ message: 'Error validating fingerprint. Please try again.' });
     } finally {
-        // Ensure to close MongoDB connection if needed, or handle it elsewhere
         await client.close();
     }
 });
