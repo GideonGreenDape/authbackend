@@ -22,6 +22,7 @@ const corsOptions = {
 
 app.use(express.json());
 app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
 
 // Setup multer for handling multiple fields
 const storage = multer.memoryStorage();
