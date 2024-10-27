@@ -9,10 +9,12 @@ const path = require('path')
 const port = process.env.PORT || 5000;
 
 const corsOptions = {
-    origin: ['http://localhost:3000', 'https://your-production-url.com'], // Replace with actual production URL
-    methods: ['GET', 'POST'], 
+    origin: 'http://localhost:5173',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization'],
 };
+
 
 
 // Middleware
@@ -43,6 +45,7 @@ app.post('/upload', upload, async (req, res) => {
 
         // Handle the profile photo and fingerprint image
         const profilePhotoBuffer = req.files['profilePhoto'] ? req.files['profilePhoto'][0].buffer : null;
+        
 
         // Decode the base64 string from fingerprintImage field if it's a base64 string
         let fingerprintBuffer;
