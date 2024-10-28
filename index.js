@@ -76,7 +76,7 @@ app.post('/validatefingerprint', upload.single('imageFile'), async (req, res) =>
     const { image } = req.body;
 
     if (!image) {
-        return res.status(400).json({ message: `No fingerprint image provided.${req.body}` });
+        return res.status(400).json({ message: `No fingerprint image provided.` });
     }
 
     try {
