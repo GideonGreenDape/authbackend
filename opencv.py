@@ -3,64 +3,69 @@ import cv2
 import numpy as np
 import json
 import base64
+from skimage.metrics import structural_similarity as ssim
 
-def load_fingerprint(image_path):
-    # Load the fingerprint image in grayscale
-    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+def fix_base64_padding(data):
+    """Fixes base64 padding if required."""
+    if isinstance(data, bytes):
+        data = data.decode('utf-8')
+    return data + '=' * (-len(data) % 4)
+
+def load_fingerprint_from_base64(base64_data):
+    """Decode base64 and convert to an OpenCV image."""
+    base64_data = fix_base64_padding(base64_data)
+    try:
+        decoded_image = base64.b64decode(base64_data)
+    except Exception as e:
+        print(f"Error decoding base64 data: {base64_data[:50]}...")  # Log the first 50 characters
+        raise ValueError("Invalid base64-encoded string.") from e
+
+    nparr = np.frombuffer(decoded_image, np.uint8)
+    image = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+
+    if image is None:
+        raise ValueError("Decoded image could not be loaded.")
     
-    # Apply preprocessing steps if needed (e.g., resize, enhance, etc.)
-    image = cv2.resize(image, (300, 300))  # Resize to a fixed size for comparison
+    image = cv2.resize(image, (300, 300))
     return image
 
 def compare_fingerprints(img1, img2):
-    # Compute SSIM score using QualitySSIM
-    score = cv2.quality.QualitySSIM.compute(img1, img2)
-    
-    # Return the score (similarity between 0 and 1)
-    return score[0]
+    score, _ = ssim(img1, img2, full=True)
+    return score
 
 if __name__ == '__main__':
-    input_image_path = sys.argv[1]  # Uploaded fingerprint path
-    fingerprint_images = json.loads(sys.argv[2])  # List of stored fingerprints (base64 encoded)
+    input_image_path = sys.argv[1]
+    fingerprint_images = json.loads(sys.argv[2])  
 
-    # Load the uploaded fingerprint image
-    uploaded_fingerprint = load_fingerprint(input_image_path)
+    try:
+        with open(input_image_path, 'rb') as f:
+            uploaded_fingerprint_base64 = base64.b64encode(f.read()).decode('utf-8')
 
-    best_match = -1  # Variable to store the index of the best match
-    best_score = 0  # Variable to store the highest score
+        uploaded_fingerprint = load_fingerprint_from_base64(uploaded_fingerprint_base64)
 
-    # Compare the uploaded fingerprint with each stored fingerprint
-    for idx, fingerprint_base64 in enumerate(fingerprint_images):
-        try:
-            # Convert base64-encoded image to an OpenCV image
-            decoded_image = base64.b64decode(fingerprint_base64)
-            nparr = np.frombuffer(decoded_image, np.uint8)
-            stored_fingerprint = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
-            
-            # Resize stored fingerprint to match the uploaded one
-            stored_fingerprint = cv2.resize(stored_fingerprint, (300, 300))
-            
-            # Compare fingerprints using SSIM
-            score = compare_fingerprints(uploaded_fingerprint, stored_fingerprint)
+        best_match = -1
+        best_score = 0
 
-            # Check if this score is the best match and above the 70% threshold
-            if score > 0.7 and score > best_score:
-                best_score = score
-                best_match = idx
-        except Exception as e:
-            print(f"Error processing fingerprint {idx}: {str(e)}", file=sys.stderr)
+        for idx, fingerprint_base64 in enumerate(fingerprint_images):
+            try:
+                stored_fingerprint = load_fingerprint_from_base64(fingerprint_base64)
+                score = compare_fingerprints(uploaded_fingerprint, stored_fingerprint)
 
-    # Prepare the result based on whether a match was found or not
-    if best_match != -1:
+                if score > 0.7 and score > best_score:
+                    best_score = score
+                    best_match = idx
+            except Exception as e:
+                print(f"Error processing fingerprint {idx}: {str(e)}", file=sys.stderr)
+
         result = {
             "matchIndex": best_match,
-            "matchPercentage": best_score * 100  # Convert to percentage
-        }
-    else:
-        result = {
-            "matchIndex": -1,
-            "message": "Match not found"
+            "matchPercentage": best_score * 100 if best_match != -1 else None
         }
 
-    # Output the result as JSON for Node.js to capture
-    print(json.dumps(result))
+        print(json.dumps(result))
+
+    except Exception as e:
+        error_result = {
+            "error": str(e)
+        }
+        print(json.dumps(error_result))

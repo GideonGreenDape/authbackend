@@ -5,8 +5,10 @@ const cors = require('cors');
 const { spawn } = require('child_process')
 const  bodyParser= require('body-parser')
 const app = express();
+const fs = require('fs');
 require('dotenv').config();
 const path = require('path')
+
 const port = process.env.PORT || 5000;
 
 const corsOptions = {
@@ -20,8 +22,8 @@ const corsOptions = {
 
 // Middleware
 
-app.use(express.json());
-app.use(bodyParser.json({ limit: '20mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Setup multer for handling multiple fields
 const storage = multer.memoryStorage();
@@ -38,6 +40,9 @@ const client = new MongoClient(process.env.MONGODB_URI);
 
 // Endpoint to handle multipart/form-data
 app.post('/upload', upload, async (req, res) => {
+    console.log(req.body);
+    console.log("Request files:", req.files);
+    
     try {
         // Connect to the MongoDB database
         await client.connect();
@@ -46,12 +51,15 @@ app.post('/upload', upload, async (req, res) => {
 
         // Handle the profile photo and fingerprint image
         const profilePhotoBuffer = req.files['profilePhoto'] ? req.files['profilePhoto'][0].buffer : null;
-        
 
         // Decode the base64 string from fingerprintImage field if it's a base64 string
         let fingerprintBuffer;
         if (req.body.fingerprintImage) {
             const base64Data = req.body.fingerprintImage.replace(/^data:image\/png;base64,/, "");
+            // Check if base64 string is valid
+            if (!isValidBase64(base64Data)) {
+                return res.status(400).json({ message: 'Invalid fingerprint image format.' });
+            }
             fingerprintBuffer = Buffer.from(base64Data, 'base64');
         } else {
             fingerprintBuffer = null;
@@ -82,12 +90,22 @@ app.post('/upload', upload, async (req, res) => {
     }
 });
 
+// Function to check if a base64 string is valid
+function isValidBase64(str) {
+    // Check if the string is a valid base64 encoded string
+    const regex = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+    return regex.test(str);
+}
+
+
 
 
 app.post('/validatefingerprint', async (req, res) => {
-    const { image } = req.body;
+    console.log(req.body);
+    
+    const { imageFile } = req.body;
 
-    if (!image) {
+    if (!imageFile) {
         return res.status(400).json({
             message: 'No fingerprint image provided.',
         });
@@ -106,19 +124,48 @@ app.post('/validatefingerprint', async (req, res) => {
             return res.status(404).json({ message: 'No fingerprints found in the database.' });
         }
 
-        // Write the uploaded fingerprint image to a temporary file
+        // Write the uploaded fingerprint image to a temporary file (strip the base64 prefix)
         const imagePath = path.join(__dirname, 'temp_fingerprint.png');
-        fs.writeFileSync(imagePath, image, 'base64'); // Assuming the image is base64 encoded
 
-        // Prepare an array of fingerprint images for Python
-        const fingerprintImages = fingerprints.map(f => f.fingerprintImage);
+        try {
+            // Validate and cleanse the imageFile
+            if (typeof imageFile !== 'string') {
+                throw new Error('Invalid image file data.');
+            }
 
-        // Spawn a child process to run the Python script
-        const pythonProcess = spawn('python', ['opencv.py', JSON.stringify(fingerprintImages), imagePath]);
+            // Check if the image data starts with the expected prefix
+            const base64Regex = /^data:image\/(?:png|jpeg|jpg);base64,/;
+            const matches = imageFile.match(base64Regex);
 
-        // Capture output from the Python script
+            if (!matches) {
+                throw new Error('Invalid image format. Expected base64 encoded image.');
+            }
+
+            // Strip the base64 prefix
+            const base64Data = imageFile.replace(base64Regex, '');
+            fs.writeFileSync(imagePath, base64Data, 'base64');
+        } catch (error) {
+            console.error('Error processing the uploaded fingerprint image:', error);
+            return res.status(400).json({ message: error.message });
+        }
+
+        // Write stored fingerprints to temporary files (convert BSON Binary to Base64)
+        const fingerprintFilePaths = [];
+        fingerprints.forEach((fingerprint, index) => {
+            const filePath = path.join(__dirname, `temp_fingerprint_${index}.png`);
+
+            // Convert MongoDB Binary type to Base64
+            const buffer = fingerprint.fingerprintImage.buffer;
+            const base64Data = buffer.toString('base64'); // Convert buffer to base64
+            fs.writeFileSync(filePath, base64Data, 'base64');  // Write base64 data to file
+            
+            fingerprintFilePaths.push(filePath);
+        });
+
+        // Spawn Python process to compare fingerprints
+        const pythonProcess = spawn('python', ['opencv.py', imagePath, JSON.stringify(fingerprintFilePaths)]);
+
         let dataFromPython = '';
-
         pythonProcess.stdout.on('data', (data) => {
             dataFromPython += data.toString();
         });
@@ -130,18 +177,14 @@ app.post('/validatefingerprint', async (req, res) => {
             }
 
             try {
-                // Parse the response from the Python script
                 const result = JSON.parse(dataFromPython);
 
-                // Check if a match was found
                 if (result.matchIndex === -1) {
                     return res.status(404).json({ message: 'No fingerprint match found.' });
                 }
 
-                // Retrieve the matching user document from MongoDB
                 const matchedUser = fingerprints[result.matchIndex];
 
-                // Respond with matched user details
                 return res.json({
                     message: 'Fingerprint match',
                     firstName: matchedUser.firstName,
@@ -157,7 +200,6 @@ app.post('/validatefingerprint', async (req, res) => {
             }
         });
 
-        // Capture any errors from the Python process
         pythonProcess.stderr.on('data', (data) => {
             console.error(`Python error: ${data}`);
             return res.status(500).json({ message: 'Error during fingerprint validation.' });
@@ -170,6 +212,7 @@ app.post('/validatefingerprint', async (req, res) => {
         await client.close();
     }
 });
+
 
 // Start the server
 app.listen(port, () => {
