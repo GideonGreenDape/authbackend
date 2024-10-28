@@ -3,15 +3,13 @@ const multer = require('multer');
 const { MongoClient } = require('mongodb');
 const cors = require('cors');
 const { spawn } = require('child_process')
-const  bodyParser= require('body-parser')
 const app = express();
-const fs = require('fs');
+const fs = require('fs').promises;
 require('dotenv').config();
 const path = require('path');
 const os = require('os');
+const sharp = require('sharp');
 
-const { promisify } = require('util');
-const writeFileAsync = promisify(fs.writeFile);
 
 
 const port = process.env.PORT || 5000;
@@ -133,46 +131,32 @@ app.post('/validatefingerprint', async (req, res) => {
 
         // Write uploaded fingerprint to a temporary file
         const uploadedFingerprintPath = path.join(tempDir, 'uploaded_fingerprint.png');
+        const base64Regex = /^data:image\/(?:png|jpeg|jpg);base64,/;
+        const base64Data = imageFile.replace(base64Regex, '');
+        
+        // Save uploaded fingerprint as a binary .png file
+        await fs.writeFile(uploadedFingerprintPath, base64Data, { encoding: 'base64' });
 
-        try {
-            // Validate and cleanse the imageFile (uploaded)
-            if (typeof imageFile !== 'string') {
-                throw new Error('Invalid image file data.');
-            }
-
-            // Check if the image data starts with the expected base64 prefix
-            const base64Regex = /^data:image\/(?:png|jpeg|jpg);base64,/;
-            const matches = imageFile.match(base64Regex);
-
-            if (!matches) {
-                throw new Error('Invalid image format. Expected base64 encoded image.');
-            }
-
-            // Strip the base64 prefix
-            const base64Data = imageFile.replace(base64Regex, '');
-            await writeFileAsync(uploadedFingerprintPath, base64Data, 'base64');
-        } catch (error) {
-            console.error('Error processing the uploaded fingerprint image:', error);
-            return res.status(400).json({ message: error.message });
-        }
-
-        // Write stored fingerprints to temporary files without converting to base64
+        // Convert and save each stored fingerprint to a PNG file
         const fingerprintFilePaths = [];
         await Promise.all(
             fingerprints.map(async (fingerprint, index) => {
-                const filePath = path.join(tempDir, `temp_fingerprint_${index}.bin`); // Change to .bin extension
+                const filePath = path.join(tempDir, `temp_fingerprint_${index}.png`);
                 
-                // Get binary fingerprint from MongoDB (it's stored as Buffer)
-                const buffer = fingerprint.fingerprintImage.buffer;
+                if (fingerprint.fingerprintImage) {
+                    // fingerprintImage is expected to be a Buffer from MongoDB
+                    const buffer = fingerprint.fingerprintImage.buffer;
 
-                // Write binary data directly to a temporary file
-                await writeFileAsync(filePath, buffer);
-                fingerprintFilePaths.push(filePath);
+                    // Use 'sharp' to save directly as PNG from Buffer
+                    await sharp(buffer).toFile(filePath);
+
+                    fingerprintFilePaths.push(filePath);
+                }
             })
         );
 
         // Spawn Python process to compare fingerprints
-        const pythonProcess = spawn('python', ['opencv.py', uploadedFingerprintPath, JSON.stringify(fingerprintFilePaths)]);
+        const pythonProcess = spawn('python', [path.join(__dirname, 'opencv.py'), uploadedFingerprintPath, JSON.stringify(fingerprintFilePaths)]);
 
         let dataFromPython = '';
         pythonProcess.stdout.on('data', (data) => {
