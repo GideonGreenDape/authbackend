@@ -7,7 +7,11 @@ const  bodyParser= require('body-parser')
 const app = express();
 const fs = require('fs');
 require('dotenv').config();
-const path = require('path')
+const path = require('path');
+const tempDir = os.tmpdir();
+const { promisify } = require('util');
+const writeFileAsync = promisify(fs.writeFile);
+
 
 const port = process.env.PORT || 5000;
 
@@ -100,9 +104,11 @@ function isValidBase64(str) {
 
 
 
+
+
 app.post('/validatefingerprint', async (req, res) => {
     console.log(req.body);
-    
+
     const { imageFile } = req.body;
 
     if (!imageFile) {
@@ -111,8 +117,8 @@ app.post('/validatefingerprint', async (req, res) => {
         });
     }
 
-    // Fetch stored fingerprints from MongoDB
     try {
+        // Connect to MongoDB
         await client.connect();
         const database = client.db('designsbyese');
         const collection = database.collection('samples');
@@ -124,16 +130,16 @@ app.post('/validatefingerprint', async (req, res) => {
             return res.status(404).json({ message: 'No fingerprints found in the database.' });
         }
 
-        // Write the uploaded fingerprint image to a temporary file (strip the base64 prefix)
-        const imagePath = path.join(__dirname, 'temp_fingerprint.png');
+        // Write uploaded fingerprint to a temporary file
+        const uploadedFingerprintPath = path.join(tempDir, 'uploaded_fingerprint.png');
 
         try {
-            // Validate and cleanse the imageFile
+            // Validate and cleanse the imageFile (uploaded)
             if (typeof imageFile !== 'string') {
                 throw new Error('Invalid image file data.');
             }
 
-            // Check if the image data starts with the expected prefix
+            // Check if the image data starts with the expected base64 prefix
             const base64Regex = /^data:image\/(?:png|jpeg|jpg);base64,/;
             const matches = imageFile.match(base64Regex);
 
@@ -143,27 +149,29 @@ app.post('/validatefingerprint', async (req, res) => {
 
             // Strip the base64 prefix
             const base64Data = imageFile.replace(base64Regex, '');
-            fs.writeFileSync(imagePath, base64Data, 'base64');
+            await writeFileAsync(uploadedFingerprintPath, base64Data, 'base64');
         } catch (error) {
             console.error('Error processing the uploaded fingerprint image:', error);
             return res.status(400).json({ message: error.message });
         }
 
-        // Write stored fingerprints to temporary files (convert BSON Binary to Base64)
+        // Write stored fingerprints to temporary files without converting to base64
         const fingerprintFilePaths = [];
-        fingerprints.forEach((fingerprint, index) => {
-            const filePath = path.join(__dirname, `temp_fingerprint_${index}.png`);
+        await Promise.all(
+            fingerprints.map(async (fingerprint, index) => {
+                const filePath = path.join(tempDir, `temp_fingerprint_${index}.bin`); // Change to .bin extension
+                
+                // Get binary fingerprint from MongoDB (it's stored as Buffer)
+                const buffer = fingerprint.fingerprintImage.buffer;
 
-            // Convert MongoDB Binary type to Base64
-            const buffer = fingerprint.fingerprintImage.buffer;
-            const base64Data = buffer.toString('base64'); // Convert buffer to base64
-            fs.writeFileSync(filePath, base64Data, 'base64');  // Write base64 data to file
-            
-            fingerprintFilePaths.push(filePath);
-        });
+                // Write binary data directly to a temporary file
+                await writeFileAsync(filePath, buffer);
+                fingerprintFilePaths.push(filePath);
+            })
+        );
 
         // Spawn Python process to compare fingerprints
-        const pythonProcess = spawn('python', ['opencv.py', imagePath, JSON.stringify(fingerprintFilePaths)]);
+        const pythonProcess = spawn('python', ['opencv.py', uploadedFingerprintPath, JSON.stringify(fingerprintFilePaths)]);
 
         let dataFromPython = '';
         pythonProcess.stdout.on('data', (data) => {
@@ -212,6 +220,7 @@ app.post('/validatefingerprint', async (req, res) => {
         await client.close();
     }
 });
+
 
 
 // Start the server

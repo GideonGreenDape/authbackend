@@ -5,52 +5,56 @@ import json
 import base64
 from skimage.metrics import structural_similarity as ssim
 
-def fix_base64_padding(data):
-    """Fixes base64 padding if required."""
-    if isinstance(data, bytes):
-        data = data.decode('utf-8')
-    return data + '=' * (-len(data) % 4)
+def convert_binary_to_base64(binary_data):
+    """Converts binary (BSON from MongoDB) to base64 encoded string."""
+    return base64.b64encode(binary_data).decode('utf-8')
 
-def load_fingerprint_from_base64(base64_data):
-    """Decode base64 and convert to an OpenCV image."""
-    base64_data = fix_base64_padding(base64_data)
-    try:
-        decoded_image = base64.b64decode(base64_data)
-    except Exception as e:
-        print(f"Error decoding base64 data: {base64_data[:50]}...")  # Log the first 50 characters
-        raise ValueError("Invalid base64-encoded string.") from e
-
+def load_fingerprint_from_binary(binary_data):
+    """Convert MongoDB binary to an OpenCV image."""
+    # Convert binary to base64 first
+    base64_data = convert_binary_to_base64(binary_data)
+    
+    # Decode base64 to raw image bytes
+    decoded_image = base64.b64decode(base64_data)
     nparr = np.frombuffer(decoded_image, np.uint8)
     image = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
 
     if image is None:
         raise ValueError("Decoded image could not be loaded.")
     
+    # Resize image for comparison
     image = cv2.resize(image, (300, 300))
     return image
 
 def compare_fingerprints(img1, img2):
+    """Compares two fingerprint images using SSIM."""
     score, _ = ssim(img1, img2, full=True)
     return score
 
 if __name__ == '__main__':
     input_image_path = sys.argv[1]
-    fingerprint_images = json.loads(sys.argv[2])  
+    fingerprint_images = json.loads(sys.argv[2])
 
     try:
+        # Load the uploaded fingerprint image from file
         with open(input_image_path, 'rb') as f:
-            uploaded_fingerprint_base64 = base64.b64encode(f.read()).decode('utf-8')
+            uploaded_fingerprint_data = f.read()
 
-        uploaded_fingerprint = load_fingerprint_from_base64(uploaded_fingerprint_base64)
+        # Convert binary file data to OpenCV image
+        uploaded_fingerprint = load_fingerprint_from_binary(uploaded_fingerprint_data)
 
         best_match = -1
         best_score = 0
 
-        for idx, fingerprint_base64 in enumerate(fingerprint_images):
+        # Loop through each fingerprint from the MongoDB collection
+        for idx, fingerprint_binary in enumerate(fingerprint_images):
             try:
-                stored_fingerprint = load_fingerprint_from_base64(fingerprint_base64)
+                # Convert stored MongoDB binary to OpenCV image
+                stored_fingerprint = load_fingerprint_from_binary(fingerprint_binary)
+                # Compare fingerprints using SSIM
                 score = compare_fingerprints(uploaded_fingerprint, stored_fingerprint)
 
+                # Find the best match based on score
                 if score > 0.7 and score > best_score:
                     best_score = score
                     best_match = idx
@@ -62,6 +66,7 @@ if __name__ == '__main__':
             "matchPercentage": best_score * 100 if best_match != -1 else None
         }
 
+        # Output result to stdout
         print(json.dumps(result))
 
     except Exception as e:
