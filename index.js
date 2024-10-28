@@ -21,7 +21,7 @@ const corsOptions = {
 // Middleware
 
 app.use(express.json());
-app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.json({ limit: '20mb' }));
 
 // Setup multer for handling multiple fields
 const storage = multer.memoryStorage();
