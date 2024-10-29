@@ -156,7 +156,7 @@ app.post('/validatefingerprint', async (req, res) => {
         );
 
         // Spawn Python process to compare fingerprints
-        const pythonProcess = spawn('python', [path.join(__dirname, 'opencv.py'), uploadedFingerprintPath, JSON.stringify(fingerprintFilePaths)]);
+        const pythonProcess = spawn('python', [path.join(__dirname, 'validatefingerprint.py'), uploadedFingerprintPath, JSON.stringify(fingerprintFilePaths)]);
 
         let dataFromPython = '';
         pythonProcess.stdout.on('data', (data) => {
